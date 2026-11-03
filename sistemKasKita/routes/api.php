@@ -6,7 +6,10 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\CohortController;
 use App\Http\Controllers\Api\ClassRoomController;
-
+use App\Http\Controllers\Api\V1\DueController;
+use App\Http\Controllers\Api\V1\BillController;
+use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\RemittanceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -107,6 +110,41 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{classRoom}', 'show');
                 Route::put('/{classRoom}', 'update');
                 Route::delete('/{classRoom}', 'destroy');
+            });
+        Route::middleware('role:bendahara_angkatan')
+            ->prefix('dues')
+            ->controller(DueController::class)
+            ->group(function () {
+                Route::get('/', 'index');
+                Route::post('/', 'store');
+                Route::get('/{due}', 'show');
+                Route::put('/{due}', 'update');
+                Route::patch('/{due}/status', 'updateStatus');
+                Route::delete('/{due}', 'destroy');
+            });
+        Route::middleware('role:bendahara_angkatan')
+            ->prefix('bills')
+            ->controller(BillController::class)
+            ->group(function () {
+                Route::get('/', 'index');
+                Route::post('/', 'store');
+                Route::get('/{bill}', 'show');
+            });
+        Route::middleware('role:bendahara_kelas')
+            ->prefix('remittances')
+            ->controller(RemittanceController::class)
+            ->group(function () {
+                Route::post('/', 'store');
+            });
+
+        // Remittance - Bendahara Angkatan
+        Route::middleware('role:bendahara_angkatan')
+            ->prefix('remittances')
+            ->controller(RemittanceController::class)
+            ->group(function () {
+                Route::get('/', 'index');
+                Route::get('/{remittance}', 'show');
+                Route::patch('/{remittance}/verify', 'verify');
             });
 
     });

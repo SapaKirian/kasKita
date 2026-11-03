@@ -12,9 +12,13 @@ class PaymentProof extends Model
 
     protected $guarded = [];
 
+    protected $casts = [
+        'uploaded_at' => 'datetime',
+    ];
+
     public function payment(): BelongsTo
     {
-        return $this->belongsTo(Payment::class);
+        return $this->belongsTo(Payment::class, 'payment_id');
     }
 
     public function uploader(): BelongsTo

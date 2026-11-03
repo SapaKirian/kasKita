@@ -13,6 +13,13 @@ class Bill extends Model
 
     protected $guarded = [];
 
+    protected $casts = [
+        'period_month' => 'integer',
+        'period_year' => 'integer',
+        'amount' => 'decimal:2',
+        'due_date' => 'date',
+    ];
+
     public function due(): BelongsTo
     {
         return $this->belongsTo(Due::class, 'dues_id');

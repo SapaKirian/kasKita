@@ -13,14 +13,19 @@ class BillRecipient extends Model
 
     protected $guarded = [];
 
+    protected $casts = [
+        'bill_amount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
+    ];
+
     public function bill(): BelongsTo
     {
-        return $this->belongsTo(Bill::class);
+        return $this->belongsTo(Bill::class, 'bill_id');
     }
 
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     public function classroom(): BelongsTo
@@ -30,6 +35,6 @@ class BillRecipient extends Model
 
     public function payments(): HasMany
     {
-        return $this->hasMany(Payment::class);
+        return $this->hasMany(Payment::class, 'bill_recipient_id');
     }
 }
