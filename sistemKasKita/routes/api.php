@@ -10,6 +10,8 @@ use App\Http\Controllers\Api\V1\DueController;
 use App\Http\Controllers\Api\V1\BillController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\RemittanceController;
+use App\Http\Controllers\Api\CashTransactionController;
+use App\Http\Controllers\Api\CashReportController;
 
 /*
 |--------------------------------------------------------------------------
@@ -146,7 +148,22 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{remittance}', 'show');
                 Route::patch('/{remittance}/verify', 'verify');
             });
-
+        Route::middleware('role:bendahara_angkatan')
+            ->prefix('cash-transactions')
+            ->controller(CashTransactionController::class)
+            ->group(function () {
+                Route::get('/', 'index');
+                Route::get('/summary', 'summary');
+                Route::post('/', 'store');
+            });
+        Route::middleware('role:bendahara_angkatan')
+            ->prefix('reports')
+            ->controller(CashReportController::class)
+            ->group(function () {
+                Route::get('/cash-flow', 'cashFlow');
+                Route::get('/cash-flow/pdf', 'exportPdf');
+                Route::get('/cash-flow/excel', 'exportExcel');
+            });
     });
 
 });

@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\ClassRoom;
 use App\Models\Payment;
 use App\Models\Remittance;
+use App\Models\Cohort;
+use App\Models\CashTransaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -217,53 +219,38 @@ class RemittanceController extends Controller
      */
     public function verify(Request $request, Remittance $remittance)
     {
-        $validated = $request->validate([
-            'status' => ['required', 'in:disetujui,ditolak'],
-            'notes' => ['nullable', 'string', 'max:5000'],
-        ]);
-
         $user = $request->user();
 
-        if ($user->role !== 'bendahara_angkatan') {
-            return response()->json([
-                'message' => 'Hanya Bendahara Angkatan yang dapat memverifikasi setoran.',
-            ], 403);
-        }
+        $validated = $request->validate([
+            'status' => ['required', 'in:disetujui,ditolak'],
+            'notes' => ['nullable', 'string'],
+        ]);
 
-        return DB::transaction(function () use ($validated, $user, $remittance) {
+        return DB::transaction(function () use ($user, $remittance, $validated) {
 
-            // Kunci data setoran.
-            $remittance = Remittance::query()
-                ->lockForUpdate()
-                ->findOrFail($remittance->id);
-
-            // Pastikan setoran milik angkatan yang dikelola.
-            if (
-                (int) $remittance->cohort_id !== (int) $user->cohort_id
-            ) {
-                return response()->json([
-                    'message' => 'Setoran ini bukan milik angkatanmu.',
-                ], 403);
-            }
-
-            // Pastikan bendahara memang pengelola angkatan.
-            $ownsCohort = DB::table('cohorts')
+            // Pastikan bendahara angkatan hanya memverifikasi setoran miliknya.
+            $ownedCohort = Cohort::query()
                 ->where('id', $user->cohort_id)
                 ->where('treasurer_id', $user->id)
                 ->exists();
 
-            if (!$ownsCohort) {
-                return response()->json([
-                    'message' => 'Kamu bukan Bendahara Angkatan yang bertanggung jawab.',
-                ], 403);
+            if (!$ownedCohort || $remittance->cohort_id != $user->cohort_id) {
+                abort(403, 'Anda tidak memiliki akses ke setoran ini.');
             }
+
+            // Kunci data setoran selama proses verifikasi.
+            $remittance = Remittance::query()
+                ->whereKey($remittance->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
             if ($remittance->status !== 'menunggu') {
-                throw ValidationException::withMessages([
-                    'status' => 'Setoran ini sudah pernah diverifikasi.',
-                ]);
+                return response()->json([
+                    'message' => 'Setoran ini sudah pernah diverifikasi.',
+                ], 422);
             }
 
+            // Update status setoran.
             $remittance->update([
                 'status' => $validated['status'],
                 'verified_by' => $user->id,
@@ -271,15 +258,41 @@ class RemittanceController extends Controller
                 'notes' => $validated['notes'] ?? $remittance->notes,
             ]);
 
+            // Jika disetujui, buat transaksi pemasukan kas.
+            if ($validated['status'] === 'disetujui') {
+
+                CashTransaction::firstOrCreate(
+                    [
+                        'remittance_id' => $remittance->id,
+                    ],
+                    [
+                        'cohort_id' => $remittance->cohort_id,
+                        'class_id' => $remittance->class_id,
+                        'transaction_type' => 'pemasukan',
+                        'category' => 'Setoran Iuran Kelas',
+                        'amount' => $remittance->amount,
+                        'description' => 'Setoran iuran dari kelas '
+                            . $remittance->classroom->name
+                            . ' periode '
+                            . $remittance->period_month
+                            . '/'
+                            . $remittance->period_year,
+                        'transaction_date' => now(),
+                        'recorded_by' => $user->id,
+                    ]
+                );
+            }
+
             return response()->json([
                 'message' => $validated['status'] === 'disetujui'
-                    ? 'Setoran berhasil disetujui.'
+                    ? 'Setoran berhasil disetujui dan pemasukan kas berhasil dicatat.'
                     : 'Setoran berhasil ditolak.',
-                'data' => $remittance->fresh()->load([
+                'data' => $remittance->load([
                     'classroom',
                     'submitter',
                     'verifier',
                     'items.payment',
+                    'cashTransaction',
                 ]),
             ]);
         });

@@ -12,6 +12,11 @@ class CashTransaction extends Model
 
     protected $guarded = [];
 
+    protected $casts = [
+        'amount' => 'decimal:2',
+        'transaction_date' => 'datetime',
+    ];
+
     public function cohort(): BelongsTo
     {
         return $this->belongsTo(Cohort::class);
@@ -25,6 +30,11 @@ class CashTransaction extends Model
     public function payment(): BelongsTo
     {
         return $this->belongsTo(Payment::class);
+    }
+
+    public function remittance(): BelongsTo
+    {
+        return $this->belongsTo(Remittance::class);
     }
 
     public function recorder(): BelongsTo
