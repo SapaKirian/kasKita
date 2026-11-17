@@ -8,9 +8,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
+use Filament\Models\Contracts\HasName;
 // use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
-class User extends Authenticatable
+class User extends Authenticatable implements FilamentUser, HasName
 {
     use HasFactory, Notifiable, HasApiTokens;
 
@@ -28,6 +31,10 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
         ];
+    }
+    public function getFilamentName(): string
+    {
+        return $this->nama;
     }
 
     public function cohort(): BelongsTo
@@ -92,5 +99,13 @@ class User extends Authenticatable
     //     )->withPivot(['joined_at', 'is_active'])
     //         ->withTimestamps();
     // }
+    public function canAccessPanel(Panel $panel): bool
+    {
+        return $this->is_active &&
+            in_array($this->role, [
+                'bendahara_angkatan',
+                'bendahara_kelas',
+            ]);
+    }
 
 }

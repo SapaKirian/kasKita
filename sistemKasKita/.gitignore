@@ -28,3 +28,23 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+.env.*
+!.env.example
+
+/storage/app/private/
+/storage/framework/
+/storage/logs/
+/bootstrap/cache/*.php
+# Semua file backup
+*.backup
+*.bak
+
+# File bukti pembayaran untuk pengujian
+sistemKasKita/bukti-transfer-*
+
+# Backup database
+*.sql
+*.sql.gz
+
+# File sensitif dan privat
+**/storage/app/private/

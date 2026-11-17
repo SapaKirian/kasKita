@@ -5,12 +5,18 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Cohort extends Model
 {
     use HasFactory;
 
     protected $guarded = [];
+
+    public function treasurer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'treasurer_id');
+    }
 
     public function users(): HasMany
     {

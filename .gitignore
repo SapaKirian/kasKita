@@ -1,0 +1,36 @@
+﻿# Environment dan rahasia
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+**/!.env.example
+
+# Dependencies
+/vendor/
+/**/vendor/
+/node_modules/
+/**/node_modules/
+
+# Editor
+.vscode/
+.idea/
+
+# Laravel
+sistemKasKita/storage/app/private/
+sistemKasKita/storage/framework/
+sistemKasKita/storage/logs/
+sistemKasKita/bootstrap/cache/*.php
+sistemKasKita/public/storage
+
+# File backup dan bukti pembayaran
+sistemKasKita/*.backup
+sistemKasKita/bukti-transfer-*
+*.sql
+*.sql.gz
+*.dump
+
+# Temporary files
+*.log
+.DS_Store
+Thumbs.db

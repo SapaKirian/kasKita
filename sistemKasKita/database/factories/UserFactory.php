@@ -2,13 +2,14 @@
 
 namespace Database\Factories;
 
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
-use Laravel\Sanctum\HasApiTokens;
 
 class UserFactory extends Factory
 {
-    use HasApiTokens, HasFactory, Notifiable;
+    protected $model = User::class;
+
     public function definition(): array
     {
         return [
@@ -34,7 +35,7 @@ class UserFactory extends Factory
 
     public function bendaharaAngkatan(): static
     {
-        return $this->state(fn (array $attributes) => [
+        return $this->state(fn(array $attributes) => [
             'role' => 'bendahara_angkatan',
             'management_type' => 'angkatan',
         ]);
@@ -42,7 +43,7 @@ class UserFactory extends Factory
 
     public function bendaharaKelas(): static
     {
-        return $this->state(fn (array $attributes) => [
+        return $this->state(fn(array $attributes) => [
             'role' => 'bendahara_kelas',
             'management_type' => 'kelas_mandiri',
         ]);
@@ -50,7 +51,7 @@ class UserFactory extends Factory
 
     public function anggota(): static
     {
-        return $this->state(fn (array $attributes) => [
+        return $this->state(fn(array $attributes) => [
             'role' => 'anggota',
         ]);
     }

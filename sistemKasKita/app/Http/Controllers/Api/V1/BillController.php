@@ -34,23 +34,47 @@ class BillController extends Controller
         return $cohort;
     }
 
-    // Menampilkan daftar tagihan
+    // Menampilkan daftar tagihan sesuai pengguna
     public function index(Request $request)
     {
-        $cohort = $this->getOwnedCohort($request);
+        $user = $request->user();
 
-        $bills = Bill::whereHas('due', function ($query) use ($cohort) {
-            $query->where('cohort_id', $cohort->id)
-                ->where('management_type', 'angkatan');
-        })
-            ->withCount('recipients')
+        $query = Bill::query()
             ->with('due:id,name')
-            ->orderByDesc('created_at')
-            ->paginate(10);
+            ->orderByDesc('created_at');
+
+        if ($user->role === 'anggota') {
+            $query->whereHas('recipients', function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+            });
+        } elseif ($user->role === 'bendahara_angkatan') {
+            $cohort = $this->getOwnedCohort($request);
+
+            $query->whereHas('due', function ($q) use ($cohort) {
+                $q->where('cohort_id', $cohort->id)
+                    ->where('management_type', 'angkatan')
+                    ->whereNull('class_id');
+            })->withCount('recipients');
+        } elseif ($user->role === 'bendahara_kelas') {
+            abort_unless(
+                $user->class_id &&
+                $user->classroom()
+                    ->where('treasurer_id', $user->id)
+                    ->exists(),
+                403,
+                'Anda bukan bendahara kelas yang berwenang.'
+            );
+
+            $query->whereHas('recipients', function ($q) use ($user) {
+                $q->where('class_id', $user->class_id);
+            })->withCount('recipients');
+        } else {
+            abort(403, 'Anda tidak memiliki akses melihat tagihan.');
+        }
 
         return response()->json([
             'message' => 'Daftar tagihan berhasil diambil.',
-            'data' => $bills,
+            'data' => $query->paginate(10),
         ]);
     }
 
@@ -67,7 +91,6 @@ class BillController extends Controller
             'due_date' => ['required', 'date'],
         ]);
 
-        // Pastikan iuran merupakan milik angkatan bendahara
         $due = Due::where('id', $validated['dues_id'])
             ->where('cohort_id', $cohort->id)
             ->where('management_type', 'angkatan')
@@ -80,7 +103,6 @@ class BillController extends Controller
             ], 404);
         }
 
-        // Cegah tagihan ganda pada periode yang sama
         $alreadyExists = Bill::where('dues_id', $due->id)
             ->where('period_month', $validated['period_month'])
             ->where('period_year', $validated['period_year'])
@@ -92,7 +114,6 @@ class BillController extends Controller
             ], 422);
         }
 
-        // Ambil seluruh anggota dalam angkatan
         $members = User::where('cohort_id', $cohort->id)
             ->where('role', 'anggota')
             ->whereNotNull('class_id')
@@ -105,7 +126,6 @@ class BillController extends Controller
         }
 
         $bill = DB::transaction(function () use ($validated, $due, $members, $request) {
-            // Buat tagihan utama
             $bill = Bill::create([
                 'dues_id' => $due->id,
                 'title' => $validated['title'],
@@ -116,7 +136,6 @@ class BillController extends Controller
                 'created_by' => $request->user()->id,
             ]);
 
-            // Buat tagihan untuk masing-masing anggota
             foreach ($members as $member) {
                 $bill->recipients()->create([
                     'user_id' => $member->id,
@@ -137,22 +156,56 @@ class BillController extends Controller
         ], 201);
     }
 
-    // Detail tagihan
+    // Detail tagihan sesuai hak akses pengguna
     public function show(Request $request, int $bill)
     {
-        $cohort = $this->getOwnedCohort($request);
+        $user = $request->user();
 
-        $item = Bill::whereHas('due', function ($query) use ($cohort) {
-            $query->where('cohort_id', $cohort->id)
-                ->where('management_type', 'angkatan');
-        })
-            ->with(['due', 'recipients.user', 'recipients.classroom'])
-            ->find($bill);
+        $query = Bill::query()
+            ->with('due', 'recipients.user', 'recipients.classroom');
+
+        if ($user->role === 'anggota') {
+            $query->whereHas('recipients', function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+            });
+        } elseif ($user->role === 'bendahara_angkatan') {
+            $cohort = $this->getOwnedCohort($request);
+
+            $query->whereHas('due', function ($q) use ($cohort) {
+                $q->where('cohort_id', $cohort->id)
+                    ->where('management_type', 'angkatan')
+                    ->whereNull('class_id');
+            });
+        } elseif ($user->role === 'bendahara_kelas') {
+            abort_unless(
+                $user->class_id &&
+                $user->classroom()
+                    ->where('treasurer_id', $user->id)
+                    ->exists(),
+                403,
+                'Anda bukan bendahara kelas yang berwenang.'
+            );
+
+            $query->whereHas('recipients', function ($q) use ($user) {
+                $q->where('class_id', $user->class_id);
+            });
+        } else {
+            abort(403, 'Anda tidak memiliki akses melihat tagihan.');
+        }
+
+        $item = $query->find($bill);
 
         if (!$item) {
             return response()->json([
                 'message' => 'Tagihan tidak ditemukan.',
             ], 404);
+        }
+
+        if ($user->role === 'anggota') {
+            $item->setRelation(
+                'recipients',
+                $item->recipients->where('user_id', $user->id)->values()
+            );
         }
 
         return response()->json([

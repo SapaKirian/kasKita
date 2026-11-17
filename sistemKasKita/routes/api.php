@@ -124,13 +124,21 @@ Route::prefix('v1')->group(function () {
                 Route::patch('/{due}/status', 'updateStatus');
                 Route::delete('/{due}', 'destroy');
             });
+        // Daftar dan detail tagihan
+// Hak akses anggota dan bendahara diperiksa di BillController
+        Route::prefix('bills')
+            ->controller(BillController::class)
+            ->group(function () {
+                Route::get('/', 'index');
+                Route::get('/{bill}', 'show');
+            });
+
+        // Membuat tagihan hanya untuk Bendahara Angkatan
         Route::middleware('role:bendahara_angkatan')
             ->prefix('bills')
             ->controller(BillController::class)
             ->group(function () {
-                Route::get('/', 'index');
                 Route::post('/', 'store');
-                Route::get('/{bill}', 'show');
             });
         Route::middleware('role:bendahara_kelas')
             ->prefix('remittances')
@@ -163,6 +171,28 @@ Route::prefix('v1')->group(function () {
                 Route::get('/cash-flow', 'cashFlow');
                 Route::get('/cash-flow/pdf', 'exportPdf');
                 Route::get('/cash-flow/excel', 'exportExcel');
+            });
+        // Download bukti pembayaran - semua role diperiksa di controller
+        Route::get('/payment-proofs/{proof}', [
+            PaymentController::class,
+            'downloadProof',
+        ]);
+        // Payment - Anggota
+        Route::middleware('role:anggota')
+            ->prefix('payments')
+            ->controller(PaymentController::class)
+            ->group(function () {
+                Route::post('/', 'store');
+                Route::get('/my', 'myPayments');
+            });
+
+        // Payment - Bendahara Kelas dan Bendahara Angkatan
+        Route::middleware('role:bendahara_kelas,bendahara_angkatan')
+            ->prefix('payments')
+            ->controller(PaymentController::class)
+            ->group(function () {
+                Route::get('/pending', 'pendingPayments');
+                Route::patch('/{payment}/verify', 'verify');
             });
     });
 

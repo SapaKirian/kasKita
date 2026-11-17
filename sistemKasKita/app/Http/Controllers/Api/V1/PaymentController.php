@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\BillRecipient;
 use App\Models\Payment;
 use App\Models\PaymentProof;
+use App\Models\ClassRoom;
+use App\Models\Cohort;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -13,7 +15,30 @@ use Illuminate\Validation\Rule;
 
 class PaymentController extends Controller
 {
-    // Anggota mengajukan pembayaran
+    // Anggota melihat riwayat pembayaran miliknya.
+    public function myPayments(Request $request)
+    {
+        $user = $request->user();
+
+        abort_unless(
+            $user->role === 'anggota',
+            403,
+            'Hanya anggota yang dapat melihat riwayat pembayaran.'
+        );
+
+        $payments = Payment::query()
+            ->where('payer_id', $user->id)
+            ->with(['proofs', 'billRecipient.bill.due'])
+            ->latest()
+            ->paginate(10);
+
+        return response()->json([
+            'message' => 'Riwayat pembayaran berhasil diambil.',
+            'data' => $payments,
+        ]);
+    }
+
+    // Anggota mengajukan pembayaran.
     public function store(Request $request)
     {
         $user = $request->user();
@@ -33,17 +58,19 @@ class PaymentController extends Controller
             'amount' => ['required', 'numeric', 'gt:0'],
             'payment_method' => [
                 'required',
-                Rule::in(['cash', 'transfer', 'qris']),
+                Rule::in(['tunai', 'transfer']),
             ],
             'proof' => [
-                'required',
+                'required_if:payment_method,transfer',
+                'nullable',
                 'file',
                 'mimes:jpg,jpeg,png,pdf',
                 'max:5120',
             ],
         ]);
 
-        $recipient = BillRecipient::where('id', $validated['bill_recipient_id'])
+        $recipient = BillRecipient::query()
+            ->whereKey($validated['bill_recipient_id'])
             ->where('user_id', $user->id)
             ->first();
 
@@ -57,28 +84,30 @@ class PaymentController extends Controller
 
         try {
             $payment = DB::transaction(function () use ($validated, $recipient, $request, &$proofPath) {
-                $recipient = BillRecipient::whereKey($recipient->id)
+                $recipient = BillRecipient::query()
+                    ->whereKey($recipient->id)
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                // Hitung pembayaran yang sudah disetujui
                 $paid = (float) $recipient->paid_amount;
 
-                // Hitung pembayaran yang masih menunggu verifikasi
-                $menunggu_verifikasi = (float) $recipient->payments()
+                $pending = (float) $recipient->payments()
                     ->where('status', 'menunggu_verifikasi')
                     ->sum('amount');
 
                 $remaining = (float) $recipient->bill_amount
                     - $paid
-                    - $menunggu_verifikasi;
+                    - $pending;
+
+                if ($remaining <= 0) {
+                    abort(
+                        422,
+                        'Tagihan sudah lunas atau seluruh sisanya sedang menunggu verifikasi.'
+                    );
+                }
 
                 if ((float) $validated['amount'] > $remaining) {
                     abort(422, 'Nominal pembayaran melebihi sisa tagihan.');
-                }
-
-                if ($remaining <= 0) {
-                    abort(422, 'Tagihan sudah lunas atau seluruh sisanya sedang diverifikasi.');
                 }
 
                 $payment = Payment::create([
@@ -91,22 +120,23 @@ class PaymentController extends Controller
                     'payment_date' => now(),
                 ]);
 
-                // Simpan bukti pembayaran
-                $proofPath = Storage::disk('public')->putFile(
-                    'payment-proofs',
-                    $request->file('proof')
-                );
+                if ($request->hasFile('proof')) {
+                    $proofPath = Storage::disk('local')->putFile(
+                        'payment-proofs',
+                        $request->file('proof')
+                    );
 
-                if (!$proofPath) {
-                    abort(500, 'Bukti pembayaran gagal disimpan.');
+                    if (!$proofPath) {
+                        abort(500, 'Bukti pembayaran gagal disimpan.');
+                    }
+
+                    PaymentProof::create([
+                        'payment_id' => $payment->id,
+                        'file_path' => $proofPath,
+                        'uploaded_by' => $request->user()->id,
+                        'uploaded_at' => now(),
+                    ]);
                 }
-
-                PaymentProof::create([
-                    'payment_id' => $payment->id,
-                    'file_path' => $proofPath,
-                    'uploaded_by' => $request->user()->id,
-                    'uploaded_at' => now(),
-                ]);
 
                 $recipient->update([
                     'status' => 'menunggu_verifikasi',
@@ -116,7 +146,7 @@ class PaymentController extends Controller
             });
         } catch (\Throwable $e) {
             if ($proofPath) {
-                Storage::disk('public')->delete($proofPath);
+                Storage::disk('local')->delete($proofPath);
             }
 
             throw $e;
@@ -128,36 +158,56 @@ class PaymentController extends Controller
         ], 201);
     }
 
-    // Menampilkan pengajuan pembayaran anggota
-    public function myPayments(Request $request)
-    {
-        $payments = Payment::where('payer_id', $request->user()->id)
-            ->with(['billRecipient.bill', 'proofs'])
-            ->orderByDesc('created_at')
-            ->paginate(10);
-
-        return response()->json([
-            'message' => 'Riwayat pembayaran berhasil diambil.',
-            'data' => $payments,
-        ]);
-    }
-
-    // Bendahara Kelas melihat pengajuan pembayaran kelasnya
+    // Bendahara melihat pembayaran sesuai kewenangannya.
     public function pendingPayments(Request $request)
     {
         $user = $request->user();
 
-        abort_unless(
-            $user->role === 'bendahara_kelas' && $user->class_id,
-            403,
-            'Anda tidak memiliki akses melihat pembayaran kelas.'
-        );
+        if ($user->role === 'bendahara_kelas') {
+            abort_unless(
+                $user->class_id &&
+                ClassRoom::query()
+                    ->whereKey($user->class_id)
+                    ->where('treasurer_id', $user->id)
+                    ->exists(),
+                403,
+                'Anda tidak memiliki akses ke pembayaran kelas.'
+            );
 
-        $payments = Payment::where('status', 'menunggu_verifikasi')
-            ->whereHas('billRecipient', function ($query) use ($user) {
-                $query->where('class_id', $user->class_id);
-            })
-            ->with(['payer', 'billRecipient.bill', 'proofs'])
+            $query = Payment::query()
+                ->whereHas('billRecipient', function ($query) use ($user) {
+                    $query->where('class_id', $user->class_id);
+                });
+        } elseif ($user->role === 'bendahara_angkatan') {
+            abort_unless(
+                $user->cohort_id &&
+                Cohort::query()
+                    ->whereKey($user->cohort_id)
+                    ->where('treasurer_id', $user->id)
+                    ->exists(),
+                403,
+                'Anda tidak memiliki akses ke pembayaran angkatan.'
+            );
+
+            $query = Payment::query()
+                ->whereHas('billRecipient.bill.due', function ($query) use ($user) {
+                    $query
+                        ->where('management_type', 'angkatan')
+                        ->where('cohort_id', $user->cohort_id)
+                        ->whereNull('class_id');
+                });
+        } else {
+            abort(403, 'Anda tidak memiliki akses melihat pembayaran.');
+        }
+
+        $payments = $query
+            ->where('status', 'menunggu_verifikasi')
+            ->with([
+                'payer',
+                'billRecipient.bill.due',
+                'billRecipient.classroom',
+                'proofs',
+            ])
             ->orderBy('created_at')
             ->paginate(10);
 
@@ -167,16 +217,10 @@ class PaymentController extends Controller
         ]);
     }
 
-    // Bendahara Kelas menyetujui atau menolak pembayaran
+    // Bendahara menyetujui atau menolak pembayaran.
     public function verify(Request $request, int $payment)
     {
         $user = $request->user();
-
-        abort_unless(
-            $user->role === 'bendahara_kelas' && $user->class_id,
-            403,
-            'Anda tidak memiliki akses verifikasi pembayaran.'
-        );
 
         $validated = $request->validate([
             'status' => [
@@ -191,35 +235,66 @@ class PaymentController extends Controller
             ],
         ]);
 
-        $item = Payment::whereKey($payment)
-            ->whereHas('billRecipient', function ($query) use ($user) {
-                $query->where('class_id', $user->class_id);
-            })
-            ->first();
+        if ($user->role === 'bendahara_kelas') {
+            abort_unless(
+                $user->class_id &&
+                ClassRoom::query()
+                    ->whereKey($user->class_id)
+                    ->where('treasurer_id', $user->id)
+                    ->exists(),
+                403,
+                'Anda tidak memiliki akses verifikasi pembayaran kelas.'
+            );
+
+            $paymentQuery = Payment::query()
+                ->whereKey($payment)
+                ->whereHas('billRecipient', function ($query) use ($user) {
+                    $query->where('class_id', $user->class_id);
+                });
+        } elseif ($user->role === 'bendahara_angkatan') {
+            abort_unless(
+                $user->cohort_id &&
+                Cohort::query()
+                    ->whereKey($user->cohort_id)
+                    ->where('treasurer_id', $user->id)
+                    ->exists(),
+                403,
+                'Anda tidak memiliki akses verifikasi pembayaran angkatan.'
+            );
+
+            $paymentQuery = Payment::query()
+                ->whereKey($payment)
+                ->whereHas('billRecipient.bill.due', function ($query) use ($user) {
+                    $query
+                        ->where('management_type', 'angkatan')
+                        ->where('cohort_id', $user->cohort_id)
+                        ->whereNull('class_id');
+                });
+        } else {
+            abort(403, 'Anda tidak memiliki akses verifikasi pembayaran.');
+        }
+
+        $item = $paymentQuery->first();
 
         if (!$item) {
             return response()->json([
-                'message' => 'Pembayaran tidak ditemukan di kelas Anda.',
+                'message' => 'Pembayaran tidak ditemukan dalam wilayah tanggung jawab Anda.',
             ], 404);
         }
 
-        if ($item->status !== 'menunggu_verifikasi') {
-            return response()->json([
-                'message' => 'Pembayaran ini sudah pernah diverifikasi.',
-            ], 422);
-        }
-
         $result = DB::transaction(function () use ($item, $validated, $user) {
-            $recipient = BillRecipient::whereKey($item->bill_recipient_id)
+            $recipient = BillRecipient::query()
+                ->whereKey($item->bill_recipient_id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            $payment = Payment::whereKey($item->id)
+            $payment = Payment::query()
+                ->whereKey($item->id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
             if ($payment->status !== 'menunggu_verifikasi') {
-                abort(422, 'Pembayaran sudah pernah diverifikasi.');
+                abort(422, 'Pembayaran ini sudah pernah diverifikasi.');
             }
 
             if ($validated['status'] === 'disetujui') {
@@ -231,10 +306,6 @@ class PaymentController extends Controller
                 }
 
                 $recipient->paid_amount = $newPaidAmount;
-
-                $recipient->status = $newPaidAmount >= (float) $recipient->bill_amount
-                    ? 'lunas'
-                    : 'belum_dibayar';
 
                 $payment->status = 'disetujui';
                 $payment->rejection_reason = null;
@@ -248,24 +319,28 @@ class PaymentController extends Controller
             $payment->verified_at = now();
             $payment->save();
 
-            // Periksa apakah masih ada pengajuan pembayaran lain
-            if ($payment->status === 'ditolak') {
-                $hasPending = $recipient->payments()
-                    ->where('status', 'menunggu_verifikasi')
-                    ->exists();
+            $hasPending = $recipient->payments()
+                ->where('status', 'menunggu_verifikasi')
+                ->exists();
 
-                if ($hasPending) {
-                    $recipient->status = 'menunggu_verifikasi';
-                } elseif ((float) $recipient->paid_amount >= (float) $recipient->bill_amount) {
-                    $recipient->status = 'lunas';
-                } else {
-                    $recipient->status = 'belum_dibayar';
-                }
+            if ($hasPending) {
+                $recipient->status = 'menunggu_verifikasi';
+            } elseif (
+                (float) $recipient->paid_amount >=
+                (float) $recipient->bill_amount
+            ) {
+                $recipient->status = 'lunas';
+            } else {
+                $recipient->status = 'belum_dibayar';
             }
 
             $recipient->save();
 
-            return $payment->fresh()->load('proofs', 'payer');
+            return $payment->fresh()->load([
+                'proofs',
+                'payer',
+                'billRecipient.bill',
+            ]);
         });
 
         return response()->json([
@@ -275,4 +350,59 @@ class PaymentController extends Controller
             'data' => $result,
         ]);
     }
+
+    // Download bukti pembayaran dengan pemeriksaan kewenangan.
+    public function downloadProof(Request $request, int $proof)
+    {
+        $user = $request->user();
+
+        $proofRecord = PaymentProof::query()
+            ->with([
+                'payment.billRecipient.bill.due',
+            ])
+            ->find($proof);
+
+        abort_unless($proofRecord, 404);
+
+        $payment = $proofRecord->payment;
+        $recipient = $payment?->billRecipient;
+        $due = $recipient?->bill?->due;
+
+        abort_unless($payment && $recipient, 404);
+
+        $authorized = false;
+
+        if ($user->role === 'anggota') {
+            $authorized = (int) $payment->payer_id === (int) $user->id;
+        } elseif ($user->role === 'bendahara_kelas') {
+            $authorized = $user->class_id
+                && ClassRoom::query()
+                    ->whereKey($user->class_id)
+                    ->where('treasurer_id', $user->id)
+                    ->exists()
+                && (int) $recipient->class_id === (int) $user->class_id;
+        } elseif ($user->role === 'bendahara_angkatan') {
+            $authorized = $user->cohort_id
+                && Cohort::query()
+                    ->whereKey($user->cohort_id)
+                    ->where('treasurer_id', $user->id)
+                    ->exists()
+                && $due
+                && $due->management_type === 'angkatan'
+                && (int) $due->cohort_id === (int) $user->cohort_id
+                && $due->class_id === null;
+        }
+
+        abort_unless($authorized, 404);
+
+        abort_unless(
+            Storage::disk('local')->exists($proofRecord->file_path),
+            404
+        );
+
+        return Storage::disk('local')->response(
+            $proofRecord->file_path
+        );
+    }
+
 }
