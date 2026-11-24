@@ -64,12 +64,13 @@ class DueController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:100'],
             'description' => ['nullable', 'string'],
+            'amount' => ['required', 'numeric', 'gt:0'],
         ]);
 
         $due = Due::create([
             'name' => $validated['name'],
             'description' => $validated['description'] ?? null,
-            'amount' => 10000,
+            'amount' => $validated['amount'],
             'period_type' => 'bulanan',
             'management_type' => 'angkatan',
             'cohort_id' => $cohort->id,
@@ -128,6 +129,7 @@ class DueController extends Controller
         $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:100'],
             'description' => ['sometimes', 'nullable', 'string'],
+            'amount' => ['sometimes', 'required', 'numeric', 'gt:0'],
         ]);
 
         $item->update($validated);

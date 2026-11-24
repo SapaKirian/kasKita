@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -69,6 +70,59 @@ class AuthController extends Controller
     {
         return response()->json([
             'data' => $request->user(),
+        ], 200);
+    }
+
+    /**
+     * Memperbarui profil sendiri (nama, email).
+     */
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'nama' => ['sometimes', 'required', 'string', 'max:100'],
+            'email' => [
+                'sometimes',
+                'nullable',
+                'email',
+                'max:100',
+                Rule::unique('users', 'email')->ignore($user->id),
+            ],
+        ]);
+
+        $user->update($validated);
+
+        return response()->json([
+            'message' => 'Profil berhasil diperbarui.',
+            'data' => $user->fresh(),
+        ], 200);
+    }
+
+    /**
+     * Mengganti kata sandi sendiri.
+     */
+    public function changePassword(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        if (!Hash::check($validated['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Kata sandi saat ini salah.'],
+            ]);
+        }
+
+        $user->update([
+            'password' => Hash::make($validated['password']),
+        ]);
+
+        return response()->json([
+            'message' => 'Kata sandi berhasil diganti.',
         ], 200);
     }
 }

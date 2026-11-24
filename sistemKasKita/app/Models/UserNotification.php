@@ -10,9 +10,14 @@ class UserNotification extends Model
 {
     use HasFactory;
 
-    protected $table = 'user_notifications';
+    // Migration membuat tabel `notifications` (bukan `user_notifications`).
+    protected $table = 'notifications';
 
     protected $guarded = [];
+
+    protected $casts = [
+        'is_read' => 'boolean',
+    ];
 
     public function user(): BelongsTo
     {

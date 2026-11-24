@@ -12,6 +12,10 @@ use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\RemittanceController;
 use App\Http\Controllers\Api\CashTransactionController;
 use App\Http\Controllers\Api\CashReportController;
+use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\AnggotaController;
+use App\Http\Controllers\Api\ArrearsController;
+use App\Http\Controllers\Api\KelasController;
 
 /*
 |--------------------------------------------------------------------------
@@ -193,6 +197,45 @@ Route::prefix('v1')->group(function () {
             ->group(function () {
                 Route::get('/pending', 'pendingPayments');
                 Route::patch('/{payment}/verify', 'verify');
+            });
+
+        // Ubah profil & kata sandi sendiri
+        Route::put('/me', [AuthController::class, 'updateProfile']);
+        Route::put('/me/password', [AuthController::class, 'changePassword']);
+
+        // Notifikasi
+        Route::get('/notifications', [NotificationController::class, 'index']);
+        Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead']);
+        Route::patch('/notifications/{id}/read', [NotificationController::class, 'markRead']);
+
+        // Ringkasan anggota
+        Route::middleware('role:anggota')
+            ->get('/anggota/summary', [AnggotaController::class, 'summary']);
+
+        // Tunggakan iuran - Bendahara Angkatan
+        Route::middleware('role:bendahara_angkatan')
+            ->prefix('arrears')
+            ->controller(ArrearsController::class)
+            ->group(function () {
+                Route::get('/', 'index');
+                Route::post('/remind', 'remind');
+            });
+
+        // Fitur Bendahara Kelas
+        Route::middleware('role:bendahara_kelas')
+            ->prefix('kelas')
+            ->controller(KelasController::class)
+            ->group(function () {
+                Route::get('/summary', 'summary');
+                Route::get('/members', 'members');
+                Route::get('/transactions', 'transactions');
+                Route::post('/expenses', 'storeExpense');
+                Route::get('/report', 'report');
+                Route::get('/payments', 'payments');
+                Route::post('/payments/cash', 'recordCash');
+                Route::get('/approved-payments', 'approvedPayments');
+                Route::get('/remittances', 'remittances');
+                Route::post('/bills', 'storeBill');
             });
     });
 
